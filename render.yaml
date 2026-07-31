@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: exam-platform-api
+    runtime: docker
+    region: singapore
+    plan: starter
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/live
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: exam-platform-postgres
+          property: connectionString
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_DAYS
+        value: "30"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: AWS_REGION
+        value: ap-south-1
+databases:
+  - name: exam-platform-postgres
+    region: singapore
+    plan: basic-256mb
+    databaseName: exam_platform
+    user: exam_admin

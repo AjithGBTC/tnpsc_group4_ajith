@@ -1,0 +1,1 @@
+"""Competitive exam platform API."""
