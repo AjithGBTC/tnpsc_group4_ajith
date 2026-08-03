@@ -1,0 +1,9 @@
+# Secrets: never commit Firebase Admin credentials or environment files.
+backend/.env
+backend/firebase-service-account.json
+backend/secrets/
+
+# Runtime/generated content
+backend/uploads/
+**/__pycache__/
+*.py[cod]

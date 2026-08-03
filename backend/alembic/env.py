@@ -1,8 +1,10 @@
 from alembic import context
 from app.database.base import Base
+from app.core.config import get_settings
 from app.models import entities  # noqa: F401
 
 target_metadata = Base.metadata
+context.config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("+asyncpg", "+psycopg"))
 
 def run_migrations_offline() -> None:
     context.configure(url=context.config.get_main_option("sqlalchemy.url"), target_metadata=target_metadata, literal_binds=True)

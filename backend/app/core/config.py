@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = []
     s3_bucket: str = ""
     aws_region: str = "ap-south-1"
+    firebase_credentials_path: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod

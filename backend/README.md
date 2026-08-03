@@ -10,6 +10,18 @@ Production-oriented FastAPI backend for the competitive-exam platform. It expose
 
 The architecture uses feature modules, async SQLAlchemy, repositories/services, JWT refresh sessions, soft deletion, RBAC permissions, audit records, and generic taxonomy/test content entities. Add Alembic revisions for all schema changes; `Base.metadata.create_all` is deliberately not used at application startup.
 
+## Mobile APIs (TNPSC Group 4 + VAO)
+
+- `POST /api/v1/auth/request-otp` and `POST /api/v1/auth/verify-otp` support phone sign-in. During development, the fixed OTP is `1234`; replace it with an SMS provider and server-side expiring OTP before production.
+- `GET /api/v1/mobile/pdfs` lists Free PDFs and `POST /api/v1/admin/pdfs` uploads a PDF for users with `content:write`.
+- `GET /api/v1/mobile/tests?test_type=practice|smart_quiz|live` lists tests. Admins create them at `POST /api/v1/admin/tests`.
+- Students start, resume, save answers, submit, analyse, review, and rank through `/api/v1/mobile/tests/{id}/start` and `/api/v1/mobile/attempts/{attempt_id}/*`.
+- Test expiry is calculated on the server. Normal and smart-quiz tests resume while their server-side time continues. Live tests allow only one non-resumable attempt.
+
+## Firebase push notifications
+
+The backend sends FCM topic notifications to `tnpsc_all` when an admin uploads a PDF, creates a standard/smart test, or announces a live test. Set `FIREBASE_CREDENTIALS_PATH` to the **absolute server-only path** of the Firebase Admin service-account JSON. Do not place that file in the repository or Flutter project. Flutter clients subscribe to `tnpsc_all` after notification permission is granted.
+
 ## Deploy to Render
 
 The repository root contains `render.yaml`. In Render, select **New > Blueprint**, connect this repository, and select the blueprint. Render creates the `exam-platform-api` Docker web service and managed PostgreSQL database, passing the database's private connection string to `DATABASE_URL`.

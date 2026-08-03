@@ -22,3 +22,12 @@ class UserResponse(BaseModel):
     email: EmailStr
     display_name: str
     roles: list[str]
+
+
+class OtpRequest(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+
+
+class OtpVerifyRequest(OtpRequest):
+    otp: str = Field(min_length=4, max_length=8)
+    display_name: str | None = Field(default=None, max_length=160)

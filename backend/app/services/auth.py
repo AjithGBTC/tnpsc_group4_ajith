@@ -6,7 +6,7 @@ from app.core.config import get_settings
 from app.models.entities import RefreshSession, User
 from app.repositories.users import UserRepository
 from app.schemas.auth import TokenPair
-from app.security.tokens import create_access_token, digest, new_refresh_token, verify_password
+from app.security.tokens import create_access_token, digest, hash_password, new_refresh_token, verify_password
 
 
 class AuthService:
@@ -22,6 +22,17 @@ class AuthService:
         session.revoked_at = datetime.now(UTC)  # rotation prevents replay
         user = await self.db.get(User, session.user_id)
         return await self._issue(user, session.device_name)
+    async def verify_phone_otp(self, phone: str, otp: str, display_name: str | None) -> TokenPair:
+        if otp != "1234":
+            raise HTTPException(status_code=401, detail="Invalid OTP")
+        user = await self.db.scalar(select(User).where(User.phone == phone, User.deleted_at.is_(None)))
+        if not user:
+            user = User(phone=phone, email=f"{phone}@mobile.local", display_name=display_name or "TNPSC Student", password_hash=hash_password(new_refresh_token()), is_verified=True)
+            self.db.add(user)
+            await self.db.flush()
+        elif user.status != "active":
+            raise HTTPException(status_code=401, detail="Account unavailable")
+        return await self._issue(user, "mobile")
     async def _issue(self, user: User, device_name: str | None) -> TokenPair:
         raw_refresh = new_refresh_token()
         self.db.add(RefreshSession(user_id=user.id, token_hash=digest(raw_refresh), device_name=device_name, expires_at=datetime.now(UTC) + timedelta(days=get_settings().refresh_token_days)))
