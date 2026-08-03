@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     def parse_origins(cls, value: str | list[str]) -> list[str]:
         return value.split(",") if isinstance(value, str) else value
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def async_database_url(cls, value: str) -> str:
+        # Render supplies postgresql://, while SQLAlchemy's async engine needs asyncpg.
+        if value.startswith("postgres://"):
+            return "postgresql+asyncpg://" + value.removeprefix("postgres://")
+        if value.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + value.removeprefix("postgresql://")
+        return value
+
 
 @lru_cache
 def get_settings() -> Settings:
