@@ -1,4 +1,4 @@
-# Exam Platform API
+# TNPSC Group 4 Learning API
 
 Production-oriented FastAPI backend for the competitive-exam platform. It exposes versioned REST endpoints at `/api/v1`, Swagger at `/docs`, liveness at `/health/live`, readiness at `/health/ready`, and Prometheus metrics at `/metrics`.
 
@@ -7,6 +7,9 @@ Production-oriented FastAPI backend for the competitive-exam platform. It expose
 1. Copy `.env.example` to `.env` and replace all secrets.
 2. Run `docker compose up --build`.
 3. Apply migrations with `alembic upgrade head` from the API container.
+
+Copy `.env.example` first. The provided compose file supplies PostgreSQL and
+Redis; never use its development credentials outside local development.
 
 The architecture uses feature modules, async SQLAlchemy, repositories/services, JWT refresh sessions, soft deletion, RBAC permissions, audit records, and generic taxonomy/test content entities. Add Alembic revisions for all schema changes; `Base.metadata.create_all` is deliberately not used at application startup.
 
@@ -26,4 +29,11 @@ The backend sends FCM topic notifications to `tnpsc_all` when an admin uploads a
 
 The repository root contains `render.yaml`. In Render, select **New > Blueprint**, connect this repository, and select the blueprint. Render creates the `exam-platform-api` Docker web service and managed PostgreSQL database, passing the database's private connection string to `DATABASE_URL`.
 
-During Blueprint creation, provide `REDIS_URL` (a TLS Redis URL from Render Key Value or another provider) and `CORS_ORIGINS` (the exact frontend origin, for example `https://your-admin.onrender.com`). Keep the generated `JWT_SECRET_KEY` private. After the first deploy, run `alembic upgrade head` from a Render Shell before creating users or content.
+During Blueprint creation, provide `REDIS_URL` (a TLS Redis URL from Render Key Value or another provider) and `CORS_ORIGINS` (the exact frontend origin, for example `https://your-admin.onrender.com`). Keep the generated `JWT_SECRET_KEY` private. The Blueprint runs `alembic upgrade head` as its pre-deploy command.
+
+## Commerce and content operations
+
+- `/api/v1/plans` and `/api/v1/payments/*` provide plan discovery, Razorpay orders, signature verification, webhook verification, invoices, and subscriptions. Values are integer paise.
+- `/api/v1/questions/import` and `/api/v1/questions/export` provide the Excel bulk-content workflow; export produces the import template.
+- Device registration, broadcast notifications, protected video publishing, user analytics, and dashboard totals are available under `/api/v1/devices`, `/api/v1/admin/*`, and `/api/v1/users/*`.
+- Production must set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, and `CORS_ORIGINS`, then run `alembic upgrade head`.

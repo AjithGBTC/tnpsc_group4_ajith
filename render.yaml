@@ -6,6 +6,7 @@ services:
     plan: starter
     rootDir: backend
     dockerfilePath: ./Dockerfile
+    preDeployCommand: alembic upgrade head
     healthCheckPath: /health/live
     autoDeployTrigger: commit
     envVars:

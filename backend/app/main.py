@@ -1,4 +1,5 @@
 import structlog
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,12 +8,22 @@ from prometheus_client import make_asgi_app
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.middleware.audit import AuditRequestMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.database.session import engine
+from sqlalchemy import text
 
 settings = get_settings()
 structlog.configure(processors=[structlog.processors.TimeStamper(fmt="iso"), structlog.processors.JSONRenderer()])
-app = FastAPI(title="Exam Platform API", version="1.0.0", openapi_url="/api/v1/openapi.json", docs_url="/docs", redoc_url="/redoc")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await engine.dispose()
+
+app = FastAPI(title="TNPSC Group 4 Learning API", version="1.0.0", openapi_url="/api/v1/openapi.json", docs_url="/docs", redoc_url="/redoc", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"], max_age=600)
 app.add_middleware(AuditRequestMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.include_router(api_router, prefix="/api/v1")
 Path("uploads").mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

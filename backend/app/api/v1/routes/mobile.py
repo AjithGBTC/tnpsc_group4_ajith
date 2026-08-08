@@ -75,6 +75,29 @@ async def upload_pdf(background_tasks: BackgroundTasks, title: str, file: Upload
     return {"data": {"id": str(resource.id), "url": resource.file_path}}
 
 
+@router.patch("/admin/pdfs/{pdf_id}", dependencies=[Depends(require_permissions("content:write"))])
+async def update_pdf(pdf_id: uuid.UUID, title: str | None = None, description: str | None = None, is_free: bool | None = None, topic_id: uuid.UUID | None = None, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    resource = await db.get(PdfResource, pdf_id)
+    if not resource or resource.deleted_at:
+        raise HTTPException(404, "PDF not found")
+    if title is not None: resource.title = title
+    if description is not None: resource.description = description
+    if is_free is not None: resource.is_free = is_free
+    if topic_id is not None: resource.topic_id = topic_id
+    resource.updated_by = user.id
+    await db.commit()
+    return {"message": "PDF updated"}
+
+
+@router.delete("/admin/pdfs/{pdf_id}", status_code=204, dependencies=[Depends(require_permissions("content:write"))])
+async def delete_pdf(pdf_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> None:
+    resource = await db.get(PdfResource, pdf_id)
+    if not resource or resource.deleted_at:
+        raise HTTPException(404, "PDF not found")
+    resource.deleted_at, resource.updated_by = now(), user.id
+    await db.commit()
+
+
 @router.get("/mobile/tests")
 async def list_tests(test_type: str | None = Query(default=None), quiz_type: str | None = Query(default=None), db: AsyncSession = Depends(get_db)):
     query = select(Test).where(Test.deleted_at.is_(None), Test.status == "active")

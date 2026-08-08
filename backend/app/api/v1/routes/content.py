@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import io
+import uuid
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_db
 from app.dependencies.auth import current_user, require_permissions
 from app.models.entities import Question, Taxonomy
 from app.schemas.content import QuestionCreate, TaxonomyCreate
+from app.services.notifications import send_topic_notification
 
 router = APIRouter(tags=["Content"])
 
@@ -29,7 +34,47 @@ async def list_questions(exam_id: str | None = None, approval_status: str | None
     return {"data": [{"id": str(q.id), "body": q.body, "status": q.approval_status, "difficulty": q.difficulty} for q in items], "meta": {"page": page, "size": size}}
 
 @router.post("/questions", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("questions:write"))])
-async def create_question(payload: QuestionCreate, user=Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def create_question(payload: QuestionCreate, background_tasks: BackgroundTasks, user=Depends(current_user), db: AsyncSession = Depends(get_db)):
     question = Question(**payload.model_dump(), created_by=user.id, updated_by=user.id)
     db.add(question); await db.commit(); await db.refresh(question)
+    if question.approval_status == "approved":
+        background_tasks.add_task(send_topic_notification, "New question added", "A new practice question is available", "question", str(question.id))
     return {"data": {"id": str(question.id), "approval_status": question.approval_status}}
+
+@router.put("/questions/{question_id:uuid}", dependencies=[Depends(require_permissions("questions:write"))])
+async def update_question(question_id: uuid.UUID, payload: QuestionCreate, user=Depends(current_user), db: AsyncSession = Depends(get_db)):
+    question = await db.get(Question, question_id)
+    if not question or question.deleted_at: raise HTTPException(404, "Question not found")
+    for key, value in payload.model_dump().items(): setattr(question, key, value)
+    question.updated_by = user.id; await db.commit(); return {"message": "Question updated"}
+
+@router.delete("/questions/{question_id:uuid}", status_code=204, dependencies=[Depends(require_permissions("questions:write"))])
+async def delete_question(question_id: uuid.UUID, user=Depends(current_user), db: AsyncSession = Depends(get_db)) -> None:
+    question = await db.get(Question, question_id)
+    if not question or question.deleted_at: raise HTTPException(404, "Question not found")
+    from datetime import UTC, datetime
+    question.deleted_at, question.updated_by = datetime.now(UTC), user.id; await db.commit()
+
+@router.get("/questions/export")
+async def export_questions(db: AsyncSession = Depends(get_db), _=Depends(require_permissions("questions:write"))):
+    import json
+    wb = Workbook(); ws = wb.active; ws.title = "Questions"
+    ws.append(["exam_id", "subject_id", "topic_id", "body", "options_json", "answer_json", "explanation", "difficulty", "question_type", "marks", "negative_marks", "approval_status"])
+    rows = (await db.scalars(select(Question).where(Question.deleted_at.is_(None)))).all()
+    for q in rows: ws.append([str(q.exam_id), str(q.subject_id or ""), str(q.topic_id or ""), q.body, json.dumps(q.options), json.dumps(q.answer), q.explanation, q.difficulty, q.question_type, q.marks, q.negative_marks, q.approval_status])
+    output = io.BytesIO(); wb.save(output); output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=questions.xlsx"})
+
+@router.post("/questions/import", dependencies=[Depends(require_permissions("questions:write"))])
+async def import_questions(file: UploadFile = File(...), user=Depends(current_user), db: AsyncSession = Depends(get_db)):
+    import json
+    if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "Upload an .xlsx file")
+    try: rows = list(load_workbook(io.BytesIO(await file.read()), read_only=True, data_only=True).active.iter_rows(min_row=2, values_only=True))
+    except Exception as exc: raise HTTPException(400, "Invalid Excel workbook") from exc
+    created = 0
+    for index, row in enumerate(rows, 2):
+        if not row or not row[0] or not row[3]: continue
+        try:
+            db.add(Question(exam_id=uuid.UUID(str(row[0])), subject_id=uuid.UUID(str(row[1])) if row[1] else None, topic_id=uuid.UUID(str(row[2])) if row[2] else None, body=str(row[3]), options=json.loads(row[4]), answer=json.loads(row[5]), explanation=row[6], difficulty=row[7] or "medium", question_type=row[8] or "single_choice", marks=int(row[9] or 1), negative_marks=int(row[10] or 0), approval_status=row[11] or "draft", created_by=user.id, updated_by=user.id)); created += 1
+        except Exception as exc: raise HTTPException(422, f"Invalid row {index}: {exc}") from exc
+    await db.commit(); return {"data": {"created": created}}

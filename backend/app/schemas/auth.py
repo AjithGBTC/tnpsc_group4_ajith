@@ -31,3 +31,4 @@ class OtpRequest(BaseModel):
 class OtpVerifyRequest(OtpRequest):
     otp: str = Field(min_length=4, max_length=8)
     display_name: str | None = Field(default=None, max_length=160)
+    device_name: str | None = Field(default="mobile", max_length=160)

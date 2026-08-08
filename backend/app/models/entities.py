@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database.base import AuditModel
@@ -35,6 +35,15 @@ class RefreshSession(AuditModel):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     device_name: Mapped[str | None] = mapped_column(String(160))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OTP(AuditModel):
+    __tablename__ = "otp"
+    phone: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Taxonomy(AuditModel):
@@ -77,6 +86,17 @@ class PdfResource(AuditModel):
     description: Mapped[str | None] = mapped_column(Text)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     is_free: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("taxonomies.id"), index=True)
+
+
+class Video(AuditModel):
+    __tablename__ = "videos"
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    stream_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(1000))
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("taxonomies.id"), index=True)
+    is_free: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Test(AuditModel):
@@ -120,3 +140,69 @@ class AttemptAnswer(AuditModel):
     question_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("questions.id"), nullable=False, index=True)
     selected: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     __table_args__ = (UniqueConstraint("attempt_id", "question_id"),)
+
+
+class SubscriptionPlan(AuditModel):
+    __tablename__ = "subscription_plans"
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    price_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_limit: Mapped[int | None] = mapped_column(Integer)
+    includes_video: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    all_access: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Coupon(AuditModel):
+    __tablename__ = "coupons"
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    max_uses: Mapped[int | None] = mapped_column(Integer)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class Subscription(AuditModel):
+    __tablename__ = "subscriptions"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subscription_plans.id"), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    tests_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class Payment(AuditModel):
+    __tablename__ = "payments"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subscription_plans.id"), nullable=False)
+    amount_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    razorpay_order_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    razorpay_payment_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(64), unique=True)
+    coupon_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class Notification(AuditModel):
+    __tablename__ = "notifications"
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class DeviceToken(AuditModel):
+    __tablename__ = "device_tokens"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class CurrentAffairs(AuditModel):
+    __tablename__ = "current_affairs"
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Setting(AuditModel):
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    value_json: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
