@@ -7,6 +7,10 @@ from app.models.entities import OTP, RefreshSession, User
 from app.repositories.users import UserRepository
 from app.schemas.auth import TokenPair
 from app.security.tokens import create_access_token, digest, hash_password, new_refresh_token, verify_password
+import structlog
+
+
+logger = structlog.get_logger(__name__)
 
 
 class AuthService:
@@ -30,7 +34,14 @@ class AuthService:
         record = OTP(phone=phone, code_hash=digest(code), expires_at=datetime.now(UTC) + timedelta(minutes=settings.otp_ttl_minutes))
         self.db.add(record)
         await self.db.commit()
-        # Never log the code. Configure an SMS provider in deployment to deliver it.
+        # This is deliberately opt-in. It is useful while testing before an SMS
+        # provider is configured, but must be disabled for real users.
+        if settings.otp_log_codes:
+            logger.warning(
+                "test_otp_generated",
+                phone_suffix=phone[-4:],
+                otp=code,
+            )
         if settings.app_env != "production":
             record.code_for_development = code  # type: ignore[attr-defined]
         return record  # type: ignore[return-value]

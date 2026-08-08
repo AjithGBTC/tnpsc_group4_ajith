@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: str = ""
     otp_ttl_minutes: int = 5
     otp_max_attempts: int = 5
+    # Enable only temporarily in a private test deployment. OTPs must never be
+    # logged in a live production environment.
+    otp_log_codes: bool = False
     request_rate_limit_per_minute: int = 120
     otp_rate_limit_per_hour: int = 5
 

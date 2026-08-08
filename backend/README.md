@@ -15,7 +15,7 @@ The architecture uses feature modules, async SQLAlchemy, repositories/services, 
 
 ## Mobile APIs (TNPSC Group 4 + VAO)
 
-- `POST /api/v1/auth/request-otp` and `POST /api/v1/auth/verify-otp` support phone sign-in. During development, the fixed OTP is `1234`; replace it with an SMS provider and server-side expiring OTP before production.
+- `POST /api/v1/auth/request-otp` and `POST /api/v1/auth/verify-otp` support phone sign-in. To test before configuring an SMS provider, set `OTP_LOG_CODES=true` temporarily and read the generated code in the API logs. Disable it before real users sign in; replace this temporary flow with an SMS provider before production.
 - `GET /api/v1/mobile/pdfs` lists Free PDFs and `POST /api/v1/admin/pdfs` uploads a PDF for users with `content:write`.
 - `GET /api/v1/mobile/tests?test_type=practice|smart_quiz|live` lists tests. Admins create them at `POST /api/v1/admin/tests`.
 - Students start, resume, save answers, submit, analyse, review, and rank through `/api/v1/mobile/tests/{id}/start` and `/api/v1/mobile/attempts/{attempt_id}/*`.
