@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Local Flutter web tooling works out of the box; production deployments
     # must set CORS_ORIGINS to their exact HTTPS admin-app origin(s).
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5000", "http://localhost:5173", "http://localhost:8080"]
+    # Flutter's Chrome runner may choose a different local port per session.
+    # Keep that developer-only case explicit instead of using an unsafe `*`.
+    cors_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     s3_bucket: str = ""
     aws_region: str = "ap-south-1"
     firebase_credentials_path: str = ""
