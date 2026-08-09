@@ -21,7 +21,16 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 app = FastAPI(title="TNPSC Group 4 Learning API", version="1.0.0", openapi_url="/api/v1/openapi.json", docs_url="/docs", redoc_url="/redoc", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"], max_age=600)
+# CORSMiddleware answers browser preflight OPTIONS requests before route
+# dependencies run, so the Authorization token is never needed for preflight.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Accept", "Authorization", "Content-Type"],
+    max_age=600,
+)
 app.add_middleware(AuditRequestMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.include_router(api_router, prefix="/api/v1")
