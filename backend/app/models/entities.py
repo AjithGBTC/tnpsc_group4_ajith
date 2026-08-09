@@ -95,6 +95,7 @@ class Video(AuditModel):
     description: Mapped[str | None] = mapped_column(Text)
     stream_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     thumbnail_url: Mapped[str | None] = mapped_column(String(1000))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
     topic_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("taxonomies.id"), index=True)
     is_free: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

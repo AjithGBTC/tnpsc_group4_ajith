@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,16 +59,43 @@ async def list_pdfs(db: AsyncSession = Depends(get_db)):
     return {"data": [{"id": str(pdf.id), "title": pdf.title, "description": pdf.description, "url": pdf.file_path, "is_free": pdf.is_free} for pdf in rows]}
 
 
+@router.get("/admin/pdfs", dependencies=[Depends(require_permissions("content:write"))])
+async def admin_pdfs(search: str | None = None, page: int = Query(1, ge=1), size: int = Query(25, ge=1, le=100), db: AsyncSession = Depends(get_db)):
+    query = select(PdfResource).where(PdfResource.deleted_at.is_(None))
+    if search: query = query.where(PdfResource.title.ilike(f"%{search}%"))
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = (await db.scalars(query.order_by(PdfResource.created_at.desc()).offset((page - 1) * size).limit(size))).all()
+    return {"data": [{"id": str(x.id), "title": x.title, "description": x.description, "url": x.file_path, "topic_id": str(x.topic_id) if x.topic_id else None, "is_free": x.is_free, "status": x.status, "created_at": x.created_at} for x in rows], "meta": {"page": page, "size": size, "total": total or 0}}
+
+
 @router.post("/admin/pdfs", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("content:write"))])
-async def upload_pdf(background_tasks: BackgroundTasks, title: str, file: UploadFile = File(...), description: str | None = None, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    if file.content_type != "application/pdf":
+async def upload_pdf(request: Request, background_tasks: BackgroundTasks, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    """Accept JSON {title, url} or multipart form data with a PDF file."""
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        payload = await request.json()
+        title, url, description, file = payload.get("title"), payload.get("url"), payload.get("description"), None
+    else:
+        form = await request.form()
+        title, url, description, file = form.get("title"), form.get("url"), form.get("description"), form.get("file")
+    if not isinstance(title, str) or not title.strip():
+        raise HTTPException(status_code=422, detail="title is required")
+    if url is not None and not isinstance(url, str):
+        raise HTTPException(status_code=422, detail="url must be a string")
+    if description is not None and not isinstance(description, str):
+        raise HTTPException(status_code=422, detail="description must be a string")
+    if not file and not url:
+        raise HTTPException(status_code=422, detail="Provide a PDF file or URL")
+    if file and (not hasattr(file, "file") or getattr(file, "content_type", None) != "application/pdf"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are allowed")
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid.uuid4()}.pdf"
-    destination = UPLOAD_DIR / filename
-    with destination.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    resource = PdfResource(title=title, description=description, file_path=f"/uploads/pdfs/{filename}", created_by=user.id, updated_by=user.id)
+    if file:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4()}.pdf"
+        destination = UPLOAD_DIR / filename
+        with destination.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        url = f"/uploads/pdfs/{filename}"
+    resource = PdfResource(title=title.strip(), description=description, file_path=url, created_by=user.id, updated_by=user.id)
     db.add(resource)
     await db.commit()
     background_tasks.add_task(send_topic_notification, "New free PDF available", title, "pdf", str(resource.id))

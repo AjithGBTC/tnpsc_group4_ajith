@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,14 +22,14 @@ router = APIRouter(tags=["Platform"])
 
 class ProfileUpdate(BaseModel): display_name: str = Field(min_length=1, max_length=160)
 class DeviceInput(BaseModel): token: str = Field(min_length=20, max_length=512); platform: str = Field(pattern="^(android|ios|web)$")
-class MediaInput(BaseModel): title: str; description: str | None = None; url: str; topic_id: uuid.UUID | None = None; is_free: bool = False
+class MediaInput(BaseModel): title: str; description: str | None = None; url: str; duration: int | None = Field(default=None, ge=0); topic_id: uuid.UUID | None = None; is_free: bool = False
 class PlanInput(BaseModel): name: str; price_paise: int = Field(ge=0); duration_days: int = Field(gt=0); test_limit: int | None = Field(default=None, ge=1); includes_video: bool = False; all_access: bool = False
 class OrderInput(BaseModel): plan_id: uuid.UUID; coupon_code: str | None = None
 class PaymentVerify(BaseModel): razorpay_order_id: str; razorpay_payment_id: str; razorpay_signature: str
 class NotificationInput(BaseModel): title: str; body: str; data: dict[str, str] = {}
 class CouponInput(BaseModel): code: str = Field(min_length=3, max_length=64); discount_percent: int = Field(ge=1, le=100); valid_until: datetime | None = None; max_uses: int | None = Field(default=None, ge=1)
 class CurrentAffairsInput(BaseModel): title: str = Field(min_length=1, max_length=240); body: str = Field(min_length=1); published_at: datetime | None = None
-class SettingInput(BaseModel): value: dict
+class SettingInput(BaseModel): value: Any
 
 def client() -> Any:
     # Import only when payment endpoints are invoked so non-payment API health
@@ -73,18 +73,26 @@ async def register_device(payload: DeviceInput, user: User = Depends(current_use
 async def videos(topic_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)):
     q = select(Video).where(Video.status == "active", Video.deleted_at.is_(None))
     if topic_id: q = q.where(Video.topic_id == topic_id)
-    return {"data": [{"id": str(x.id), "title": x.title, "url": x.stream_url, "is_free": x.is_free} for x in (await db.scalars(q)).all()]}
+    return {"data": [{"id": str(x.id), "title": x.title, "url": x.stream_url, "duration": x.duration_seconds, "is_free": x.is_free} for x in (await db.scalars(q)).all()]}
+
+@router.get("/admin/videos", dependencies=[Depends(require_permissions("content:write"))])
+async def admin_videos(search: str | None = None, page: int = Query(1, ge=1), size: int = Query(25, ge=1, le=100), db: AsyncSession = Depends(get_db)):
+    q = select(Video).where(Video.deleted_at.is_(None))
+    if search: q = q.where(Video.title.ilike(f"%{search}%"))
+    total = await db.scalar(select(func.count()).select_from(q.subquery()))
+    rows = (await db.scalars(q.order_by(Video.created_at.desc()).offset((page - 1) * size).limit(size))).all()
+    return {"data": [{"id": str(x.id), "title": x.title, "description": x.description, "url": x.stream_url, "duration": x.duration_seconds, "topic_id": str(x.topic_id) if x.topic_id else None, "is_free": x.is_free, "status": x.status, "created_at": x.created_at} for x in rows], "meta": {"page": page, "size": size, "total": total or 0}}
 
 @router.post("/admin/videos", dependencies=[Depends(require_permissions("content:write"))], status_code=201)
 async def create_video(payload: MediaInput, bg: BackgroundTasks, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    item = Video(title=payload.title, description=payload.description, stream_url=payload.url, topic_id=payload.topic_id, is_free=payload.is_free, created_by=user.id, updated_by=user.id); db.add(item); await db.commit()
+    item = Video(title=payload.title, description=payload.description, stream_url=payload.url, duration_seconds=payload.duration, topic_id=payload.topic_id, is_free=payload.is_free, created_by=user.id, updated_by=user.id); db.add(item); await db.commit()
     bg.add_task(send_topic_notification, "New video uploaded", item.title, "video", str(item.id)); return {"data": {"id": str(item.id)}}
 
 @router.put("/admin/videos/{video_id}", dependencies=[Depends(require_permissions("content:write"))])
 async def update_video(video_id: uuid.UUID, payload: MediaInput, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     item = await db.get(Video, video_id)
     if not item or item.deleted_at: raise HTTPException(404, "Video not found")
-    item.title, item.description, item.stream_url, item.topic_id, item.is_free, item.updated_by = payload.title, payload.description, payload.url, payload.topic_id, payload.is_free, user.id
+    item.title, item.description, item.stream_url, item.duration_seconds, item.topic_id, item.is_free, item.updated_by = payload.title, payload.description, payload.url, payload.duration, payload.topic_id, payload.is_free, user.id
     await db.commit(); return {"message": "Video updated"}
 
 @router.delete("/admin/videos/{video_id}", status_code=204, dependencies=[Depends(require_permissions("content:write"))])
@@ -159,6 +167,15 @@ async def broadcast(payload: NotificationInput, bg: BackgroundTasks, user: User 
     notification = Notification(title=payload.title, body=payload.body, data_json=payload.data, created_by=user.id, updated_by=user.id); db.add(notification); await db.commit()
     bg.add_task(send_topic_notification, payload.title, payload.body, "manual", str(notification.id)); return {"data": {"id": str(notification.id)}}
 
+@router.get("/admin/notifications/history", dependencies=[Depends(require_permissions("notifications:write"))])
+async def notification_history(search: str | None = None, page: int = 1, size: int = 25, db: AsyncSession = Depends(get_db)):
+    if page < 1 or size < 1 or size > 100: raise HTTPException(422, "page must be >= 1 and size must be 1-100")
+    query = select(Notification).where(Notification.deleted_at.is_(None))
+    if search: query = query.where((Notification.title.ilike(f"%{search}%")) | (Notification.body.ilike(f"%{search}%")))
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = (await db.scalars(query.order_by(Notification.created_at.desc()).offset((page - 1) * size).limit(size))).all()
+    return {"data": [{"id": str(x.id), "title": x.title, "body": x.body, "data": x.data_json, "status": x.status, "sent_at": x.created_at} for x in rows], "meta": {"page": page, "size": size, "total": total or 0}}
+
 @router.get("/current-affairs")
 async def current_affairs(db: AsyncSession = Depends(get_db)):
     rows = (await db.scalars(select(CurrentAffairs).where(CurrentAffairs.status == "active", CurrentAffairs.deleted_at.is_(None)).order_by(CurrentAffairs.published_at.desc()))).all()
@@ -183,6 +200,8 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
 
 @router.put("/admin/settings/{key}", dependencies=[Depends(require_permissions("admin:write"))])
 async def put_setting(key: str, payload: SettingInput, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    if key == "maintenance_mode" and not isinstance(payload.value, bool): raise HTTPException(422, "maintenance_mode must be a boolean")
+    if key == "app_version" and not isinstance(payload.value, str): raise HTTPException(422, "app_version must be a string")
     item = await db.scalar(select(Setting).where(Setting.key == key, Setting.deleted_at.is_(None)))
     if item: item.value_json, item.updated_by = payload.value, user.id
     else: db.add(Setting(key=key, value_json=payload.value, created_by=user.id, updated_by=user.id))

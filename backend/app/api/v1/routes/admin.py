@@ -16,7 +16,7 @@ from app.database.session import get_db
 from app.dependencies.auth import current_user, require_permissions
 from app.models.entities import (
     AuditLog, Coupon, CurrentAffairs, Payment, Question, Role, Subscription,
-    Setting, SubscriptionPlan, Test, TestAttempt, TestQuestion, User, UserRole,
+    Setting, SubscriptionPlan, Taxonomy, Test, TestAttempt, TestQuestion, User, UserRole,
 )
 from app.schemas.mobile import TestCreate
 
@@ -304,3 +304,44 @@ async def analytics(db: AsyncSession = Depends(get_db)):
     attempts = await db.scalar(select(func.count(TestAttempt.id)).where(TestAttempt.deleted_at.is_(None)))
     submitted = await db.scalar(select(func.count(TestAttempt.id)).where(TestAttempt.status == "submitted", TestAttempt.deleted_at.is_(None)))
     return {"data": {"users": users, "active_users": active_users, "revenue_paise": paid, "attempts": attempts, "submitted_attempts": submitted}}
+
+
+@router.get("/analytics/detailed", dependencies=[Depends(require_permissions("admin:read"))])
+async def detailed_analytics(db: AsyncSession = Depends(get_db)):
+    """Report-ready metrics; subject rankings are ordered by completed-test use."""
+    current = datetime.now(UTC)
+    revenue = await db.scalar(select(func.coalesce(func.sum(Payment.amount_paise), 0)).where(Payment.status == "paid", Payment.deleted_at.is_(None)))
+    active_subscriptions = await db.scalar(select(func.count(Subscription.id)).where(Subscription.deleted_at.is_(None), Subscription.status == "active", Subscription.ends_at > current))
+    avg_time = await db.scalar(select(func.avg(func.extract("epoch", TestAttempt.submitted_at - TestAttempt.started_at))).where(TestAttempt.status == "submitted", TestAttempt.submitted_at.is_not(None), TestAttempt.deleted_at.is_(None)))
+    ranking_rows = (await db.execute(
+        select(
+            Question.subject_id,
+            Taxonomy.name.label("subject_name"),
+            func.count(func.distinct(TestAttempt.id)).label("attempt_count"),
+        )
+        .join(Taxonomy, Taxonomy.id == Question.subject_id)
+        .join(TestQuestion, TestQuestion.question_id == Question.id)
+        .join(TestAttempt, TestAttempt.test_id == TestQuestion.test_id)
+        .where(Question.deleted_at.is_(None), Question.subject_id.is_not(None), TestQuestion.deleted_at.is_(None), TestAttempt.deleted_at.is_(None), TestAttempt.status == "submitted")
+        .group_by(Question.subject_id)
+        .order_by(func.count(func.distinct(TestAttempt.id)).desc())
+        .limit(10)
+    )).all()
+    average_test_time_seconds = round(float(avg_time or 0), 2)
+    subject_rankings = [
+        {
+            "subject_id": str(row.subject_id),
+            "subject_name": row.subject_name,
+            "completed_attempts": row.attempt_count,
+        }
+        for row in ranking_rows
+    ]
+    return {"data": {
+        "revenue": float((revenue or 0) / 100),
+        "active_subscriptions": active_subscriptions or 0,
+        "average_test_time_seconds": average_test_time_seconds,
+        # Dashboard-friendly aliases retained alongside the explicit names.
+        "active_subs": active_subscriptions or 0,
+        "avg_time": average_test_time_seconds,
+        "subject_rankings": subject_rankings,
+    }}
