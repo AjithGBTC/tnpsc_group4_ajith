@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
     refresh_token_days: int = 30
-    cors_origins: list[str] = []
+    # Local Flutter web tooling works out of the box; production deployments
+    # must set CORS_ORIGINS to their exact HTTPS admin-app origin(s).
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"]
     s3_bucket: str = ""
     aws_region: str = "ap-south-1"
     firebase_credentials_path: str = ""

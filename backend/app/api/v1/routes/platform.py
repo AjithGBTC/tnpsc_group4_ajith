@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.database.session import get_db
 from app.dependencies.auth import current_user, require_permissions
 from app.models.entities import (Coupon, CurrentAffairs, DeviceToken, Notification, Payment,
-    Setting, Subscription, SubscriptionPlan, TestAttempt, User, Video)
+    Question, Setting, Subscription, SubscriptionPlan, TestAttempt, User, Video)
 from app.services.notifications import send_topic_notification
 
 router = APIRouter(tags=["Platform"])
@@ -175,11 +175,6 @@ async def create_coupon(payload: CouponInput, user: User = Depends(current_user)
     if exists: raise HTTPException(409, "Coupon code already exists")
     coupon = Coupon(**{**payload.model_dump(), "code": payload.code.upper()}, created_by=user.id, updated_by=user.id); db.add(coupon); await db.commit(); return {"data": {"id": str(coupon.id), "code": coupon.code}}
 
-@router.get("/admin/users", dependencies=[Depends(require_permissions("admin:read"))])
-async def admin_users(db: AsyncSession = Depends(get_db)):
-    rows = (await db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc()).limit(200))).all()
-    return {"data": [{"id": str(item.id), "phone": item.phone, "display_name": item.display_name, "status": item.status, "created_at": item.created_at} for item in rows]}
-
 @router.get("/admin/settings/{key}", dependencies=[Depends(require_permissions("admin:read"))])
 async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
     item = await db.scalar(select(Setting).where(Setting.key == key, Setting.deleted_at.is_(None)))
@@ -195,5 +190,9 @@ async def put_setting(key: str, payload: SettingInput, user: User = Depends(curr
 
 @router.get("/admin/dashboard", dependencies=[Depends(require_permissions("admin:read"))])
 async def dashboard(db: AsyncSession = Depends(get_db)):
-    users, revenue, attempts = await db.scalar(select(func.count(User.id))), await db.scalar(select(func.coalesce(func.sum(Payment.amount_paise), 0)).where(Payment.status == "paid")), await db.scalar(select(func.count(TestAttempt.id)))
-    return {"data": {"users": users, "revenue_paise": revenue, "attempts": attempts}}
+    current = datetime.now(UTC)
+    users = await db.scalar(select(func.count(User.id)).where(User.deleted_at.is_(None)))
+    revenue = await db.scalar(select(func.coalesce(func.sum(Payment.amount_paise), 0)).where(Payment.status == "paid", Payment.deleted_at.is_(None)))
+    active_subscriptions = await db.scalar(select(func.count(Subscription.id)).where(Subscription.deleted_at.is_(None), Subscription.status == "active", Subscription.ends_at > current))
+    pending_questions = await db.scalar(select(func.count(Question.id)).where(Question.deleted_at.is_(None), Question.approval_status == "draft"))
+    return {"total_users": users or 0, "total_revenue": float((revenue or 0) / 100), "active_subscriptions": active_subscriptions or 0, "pending_questions": pending_questions or 0}

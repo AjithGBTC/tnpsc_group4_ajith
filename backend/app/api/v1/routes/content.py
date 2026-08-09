@@ -1,7 +1,7 @@
 import io
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,8 +62,11 @@ async def export_questions(db: AsyncSession = Depends(get_db), _=Depends(require
     ws.append(["exam_id", "subject_id", "topic_id", "body", "options_json", "answer_json", "explanation", "difficulty", "question_type", "marks", "negative_marks", "approval_status"])
     rows = (await db.scalars(select(Question).where(Question.deleted_at.is_(None)))).all()
     for q in rows: ws.append([str(q.exam_id), str(q.subject_id or ""), str(q.topic_id or ""), q.body, json.dumps(q.options), json.dumps(q.answer), q.explanation, q.difficulty, q.question_type, q.marks, q.negative_marks, q.approval_status])
-    output = io.BytesIO(); wb.save(output); output.seek(0)
-    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=questions.xlsx"})
+    export_dir = Path("uploads/exports")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"questions-{uuid.uuid4().hex}.xlsx"
+    wb.save(export_dir / filename)
+    return {"download_url": f"/uploads/exports/{filename}"}
 
 @router.post("/questions/import", dependencies=[Depends(require_permissions("questions:write"))])
 async def import_questions(file: UploadFile = File(...), user=Depends(current_user), db: AsyncSession = Depends(get_db)):
