@@ -15,6 +15,22 @@ The architecture uses feature modules, async SQLAlchemy, repositories/services, 
 
 ## Mobile APIs (TNPSC Group 4 + VAO)
 
+## Dedicated TNPSC Group 4 course APIs
+
+The `/api/v1/mobile/syllabus` endpoint returns the complete `subject → unit →
+chapter` tree. `GET /mobile/chapters/{chapter_id}/content` returns videos,
+PDFs and chapter tests, while `/mobile/course/tests/{test_id}/start`, `submit`, and
+`leaderboard` handle a scored exam flow without exposing correct answers
+before submission. All learner test endpoints require a JWT obtained through
+the phone OTP endpoints.
+
+Content operators use `/api/v1/admin/course/{subjects|units|chapters|videos|pdfs|tests}`
+for CRUD, `/admin/course/questions` for question/options creation, and
+`/admin/uploads` for authenticated file uploads. These routes require the
+existing `content:write` or `questions:write` RBAC permissions. In development
+uploads are served from `/uploads`; configure `S3_BUCKET` and `AWS_REGION` to
+send assets to AWS S3 instead.
+
 - `POST /api/v1/auth/request-otp` and `POST /api/v1/auth/verify-otp` support phone sign-in. To test before configuring an SMS provider, set `OTP_LOG_CODES=true` temporarily and read the generated code in the API logs. Disable it before real users sign in; replace this temporary flow with an SMS provider before production.
 - `GET /api/v1/mobile/pdfs` lists Free PDFs and `POST /api/v1/admin/pdfs` uploads a PDF for users with `content:write`.
 - `GET /api/v1/mobile/tests?test_type=practice|smart_quiz|live` lists tests. Admins create them at `POST /api/v1/admin/tests`.

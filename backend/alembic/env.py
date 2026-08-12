@@ -11,7 +11,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.database.base import Base
 from app.core.config import get_settings
-from app.models import entities  # noqa: F401
+from app.models import course, entities  # noqa: F401
 
 target_metadata = Base.metadata
 context.config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("+asyncpg", "+psycopg"))
