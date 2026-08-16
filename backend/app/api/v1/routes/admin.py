@@ -323,7 +323,10 @@ async def detailed_analytics(db: AsyncSession = Depends(get_db)):
         .join(TestQuestion, TestQuestion.question_id == Question.id)
         .join(TestAttempt, TestAttempt.test_id == TestQuestion.test_id)
         .where(Question.deleted_at.is_(None), Question.subject_id.is_not(None), TestQuestion.deleted_at.is_(None), TestAttempt.deleted_at.is_(None), TestAttempt.status == "submitted")
-        .group_by(Question.subject_id)
+        # PostgreSQL requires every selected non-aggregate column to be in the
+        # grouping set.  Grouping only by ``Question.subject_id`` caused this
+        # dashboard endpoint to return a 500 whenever the rankings query ran.
+        .group_by(Question.subject_id, Taxonomy.name)
         .order_by(func.count(func.distinct(TestAttempt.id)).desc())
         .limit(10)
     )).all()
