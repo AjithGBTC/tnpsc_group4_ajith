@@ -31,6 +31,15 @@ existing `content:write` or `questions:write` RBAC permissions. In development
 uploads are served from `/uploads`; configure `S3_BUCKET` and `AWS_REGION` to
 send assets to AWS S3 instead.
 
+Flutter multipart uploads use `POST /api/v1/admin/course/videos/upload` with
+`chapter_id`, `title_ta`, `title_en`, and a `video/*` `file`, or
+`POST /api/v1/admin/course/pdfs/upload` with `chapter_id`, `title`, and an
+`application/pdf` `file`. Both require `content:write`, validate the target
+chapter, and stream the file instead of reading it into application memory.
+Set `S3_PUBLIC_BASE_URL` to the public bucket or CDN origin when S3 is used.
+Subjects, units, and chapters accept and return Flutter's `title_ta` and
+`title_en` fields; question creation requires `chapter_id`.
+
 - `POST /api/v1/auth/request-otp` and `POST /api/v1/auth/verify-otp` support phone sign-in. To test before configuring an SMS provider, set `OTP_LOG_CODES=true` temporarily and read the generated code in the API logs. Disable it before real users sign in; replace this temporary flow with an SMS provider before production.
 - `GET /api/v1/mobile/pdfs` lists Free PDFs and `POST /api/v1/admin/pdfs` uploads a PDF for users with `content:write`.
 - `GET /api/v1/mobile/tests?test_type=practice|smart_quiz|live` lists tests. Admins create them at `POST /api/v1/admin/tests`.

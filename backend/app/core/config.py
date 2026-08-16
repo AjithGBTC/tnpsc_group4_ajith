@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     s3_bucket: str = ""
     aws_region: str = "ap-south-1"
+    # Optional CDN or public bucket URL, for example https://cdn.example.com.
+    # When omitted, StorageService returns the standard S3 object URL.
+    s3_public_base_url: str = ""
     firebase_credentials_path: str = ""
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""

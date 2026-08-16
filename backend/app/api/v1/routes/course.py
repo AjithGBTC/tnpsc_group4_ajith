@@ -1,6 +1,6 @@
 """Dedicated mobile and admin APIs for the TNPSC course hierarchy."""
 import uuid
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_db
@@ -14,7 +14,21 @@ router = APIRouter(tags=["TNPSC Course"])
 ADMIN_MODELS = {"subjects": (Subject, SubjectIn), "units": (Unit, UnitIn), "chapters": (Chapter, ChapterIn), "videos": (CourseVideo, VideoIn), "pdfs": (CoursePdf, PdfIn), "tests": (CourseTest, TestIn)}
 
 def out(item):
-    return {column.name: (str(value) if isinstance(value, uuid.UUID) else value) for column in item.__table__.columns if (value := getattr(item, column.name)) is not None}
+    values = {column.name: (str(value) if isinstance(value, uuid.UUID) else value) for column in item.__table__.columns if (value := getattr(item, column.name)) is not None}
+    # Flutter uses short Tamil/English keys; database names remain unchanged to
+    # avoid a breaking table migration.
+    if "title_tamil" in values:
+        values["title_ta"] = values.pop("title_tamil")
+    if "title_english" in values:
+        values["title_en"] = values.pop("title_english")
+    return values
+
+
+async def active_chapter_or_422(chapter_id: uuid.UUID, db: AsyncSession) -> Chapter:
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.deleted_at or chapter.status != "active":
+        raise HTTPException(422, "chapter_id must reference an active chapter")
+    return chapter
 
 @router.get("/mobile/syllabus")
 async def syllabus(db: AsyncSession = Depends(get_db)):
@@ -95,10 +109,56 @@ async def admin_delete(resource: str, item_id: uuid.UUID, user: User = Depends(c
 
 @router.post("/admin/course/questions", status_code=201, dependencies=[Depends(require_permissions("questions:write"))])
 async def create_question(payload: QuestionIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    await active_chapter_or_422(payload.chapter_id, db)
+    test = await db.get(CourseTest, payload.test_id)
+    if not test or test.deleted_at:
+        raise HTTPException(422, "test_id must reference an active test")
+    if test.chapter_id and test.chapter_id != payload.chapter_id:
+        raise HTTPException(422, "chapter_id must match the test's chapter")
     values = payload.model_dump(exclude={"options"}); question = CourseQuestion(**values, created_by=user.id, updated_by=user.id); db.add(question); await db.flush()
     db.add_all([QuestionOption(question_id=question.id, **o.model_dump(), created_by=user.id, updated_by=user.id) for o in payload.options])
-    test = await db.get(CourseTest, question.test_id); test.total_questions += 1
+    test.total_questions += 1
     await db.commit(); return {"data": {"id": str(question.id)}}
+
+
+@router.post("/admin/course/videos/upload", status_code=201, dependencies=[Depends(require_permissions("content:write"))])
+async def upload_course_video(
+    chapter_id: uuid.UUID = Form(...),
+    title_ta: str = Form(...),
+    title_en: str = Form(...),
+    file: UploadFile = File(...),
+    faculty_name: str | None = Form(None),
+    duration: int | None = Form(None),
+    thumbnail_url: str | None = Form(None),
+    notes_url: str | None = Form(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await active_chapter_or_422(chapter_id, db)
+    if not (file.content_type or "").startswith("video/"):
+        raise HTTPException(400, "Only video uploads are allowed")
+    url = await StorageService().upload(file, prefix="course/videos")
+    item = CourseVideo(chapter_id=chapter_id, title_tamil=title_ta, title_english=title_en, faculty_name=faculty_name, duration=duration, thumbnail_url=thumbnail_url, notes_url=notes_url, video_url=url, created_by=user.id, updated_by=user.id)
+    db.add(item); await db.commit(); await db.refresh(item)
+    return {"data": out(item)}
+
+
+@router.post("/admin/course/pdfs/upload", status_code=201, dependencies=[Depends(require_permissions("content:write"))])
+async def upload_course_pdf(
+    chapter_id: uuid.UUID = Form(...),
+    title: str = Form(...),
+    file: UploadFile = File(...),
+    description: str | None = Form(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await active_chapter_or_422(chapter_id, db)
+    if file.content_type != "application/pdf":
+        raise HTTPException(400, "Only PDF uploads are allowed")
+    url = await StorageService().upload(file, prefix="course/pdfs")
+    item = CoursePdf(chapter_id=chapter_id, title=title, description=description, file_url=url, created_by=user.id, updated_by=user.id)
+    db.add(item); await db.commit(); await db.refresh(item)
+    return {"data": out(item)}
 
 @router.post("/admin/uploads", dependencies=[Depends(require_permissions("content:write"))])
 async def upload_file(file: UploadFile = File(...), user: User = Depends(current_user)):

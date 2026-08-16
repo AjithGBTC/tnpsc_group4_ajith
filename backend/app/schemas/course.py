@@ -1,18 +1,22 @@
 import uuid
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-class SubjectIn(BaseModel):
-    title_tamil: str = Field(min_length=1, max_length=240)
-    title_english: str = Field(min_length=1, max_length=240)
+
+class LocalizedTitleIn(BaseModel):
+    """Accept Flutter's title_ta/title_en while retaining current DB columns."""
+    model_config = ConfigDict(populate_by_name=True)
+    title_tamil: str = Field(min_length=1, max_length=240, validation_alias="title_ta")
+    title_english: str = Field(min_length=1, max_length=240, validation_alias="title_en")
+
+class SubjectIn(LocalizedTitleIn):
     category: str = Field(pattern="^(Tamil|GS|Aptitude)$")
-class UnitIn(BaseModel):
+class UnitIn(LocalizedTitleIn):
     subject_id: uuid.UUID; unit_number: int = Field(ge=1)
-    title_tamil: str; title_english: str
-class ChapterIn(BaseModel):
+class ChapterIn(LocalizedTitleIn):
     unit_id: uuid.UUID; chapter_number: int = Field(ge=1)
-    title_tamil: str; title_english: str; standard: int = Field(ge=6, le=12)
-class VideoIn(BaseModel):
-    chapter_id: uuid.UUID; title_tamil: str; title_english: str; faculty_name: str | None = None
+    standard: int = Field(ge=6, le=12)
+class VideoIn(LocalizedTitleIn):
+    chapter_id: uuid.UUID; faculty_name: str | None = None
     video_url: str; thumbnail_url: str | None = None; duration: int | None = Field(None, ge=0); notes_url: str | None = None
 class PdfIn(BaseModel):
     chapter_id: uuid.UUID; title: str; description: str | None = None; file_url: str
@@ -23,7 +27,7 @@ class TestIn(BaseModel):
 class OptionIn(BaseModel):
     text: str = Field(min_length=1); is_correct: bool = False
 class QuestionIn(BaseModel):
-    test_id: uuid.UUID; text: str = Field(min_length=1); explanation: str | None = None
+    test_id: uuid.UUID; chapter_id: uuid.UUID; text: str = Field(min_length=1); explanation: str | None = None
     type: str = Field(default="single_choice", pattern="^(single_choice|multiple_choice)$")
     image_url: str | None = None; options: list[OptionIn] = Field(min_length=2)
     @model_validator(mode="after")

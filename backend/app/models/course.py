@@ -68,6 +68,7 @@ class CourseTest(AuditModel):
 class CourseQuestion(AuditModel):
     __tablename__ = "course_questions"
     test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("course_tests.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     explanation: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(20), default="single_choice", nullable=False)
