@@ -46,6 +46,8 @@ class CourseVideo(AuditModel):
     thumbnail_url: Mapped[str | None] = mapped_column(String(1000))
     duration: Mapped[int | None] = mapped_column(Integer)
     notes_url: Mapped[str | None] = mapped_column(String(1000))
+    hls_url: Mapped[str | None] = mapped_column(String(1000))
+    transcoding_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
 
 
 class CoursePdf(AuditModel):
@@ -54,6 +56,8 @@ class CoursePdf(AuditModel):
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     file_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    offline_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class CourseTest(AuditModel):

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Optional CDN or public bucket URL, for example https://cdn.example.com.
     # When omitted, StorageService returns the standard S3 object URL.
     s3_public_base_url: str = ""
+    # Private course assets are returned as short-lived URLs. Leave this false
+    # only for local development where /uploads is intentionally public.
+    private_assets: bool = True
+    signed_url_minutes: int = 15
+    ffmpeg_binary: str = "ffmpeg"
     firebase_credentials_path: str = ""
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""

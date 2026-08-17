@@ -19,6 +19,7 @@ from app.models.entities import (
     Setting, SubscriptionPlan, Taxonomy, Test, TestAttempt, TestQuestion, User, UserRole,
 )
 from app.schemas.mobile import TestCreate
+from app.services.cache import CacheService
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
 
@@ -298,12 +299,17 @@ async def audit_logs(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=
 
 @router.get("/analytics", dependencies=[Depends(require_permissions("admin:read"))])
 async def analytics(db: AsyncSession = Depends(get_db)):
+    cache = CacheService()
+    if cached := await cache.get("admin:analytics:v1"):
+        return cached
     users = await db.scalar(select(func.count(User.id)).where(User.deleted_at.is_(None)))
     active_users = await db.scalar(select(func.count(User.id)).where(User.deleted_at.is_(None), User.status == "active"))
     paid = await db.scalar(select(func.coalesce(func.sum(Payment.amount_paise), 0)).where(Payment.status == "paid", Payment.deleted_at.is_(None)))
     attempts = await db.scalar(select(func.count(TestAttempt.id)).where(TestAttempt.deleted_at.is_(None)))
     submitted = await db.scalar(select(func.count(TestAttempt.id)).where(TestAttempt.status == "submitted", TestAttempt.deleted_at.is_(None)))
-    return {"data": {"users": users, "active_users": active_users, "revenue_paise": paid, "attempts": attempts, "submitted_attempts": submitted}}
+    response = {"data": {"users": users, "active_users": active_users, "revenue_paise": paid, "attempts": attempts, "submitted_attempts": submitted}}
+    await cache.set("admin:analytics:v1", response, seconds=60)
+    return response
 
 
 @router.get("/analytics/detailed", dependencies=[Depends(require_permissions("admin:read"))])

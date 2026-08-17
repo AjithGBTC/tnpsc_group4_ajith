@@ -6,6 +6,7 @@ uploaded to S3-compatible cloud storage and a public object URL is returned.
 import asyncio
 import shutil
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from fastapi import UploadFile
 from app.core.config import get_settings
@@ -45,3 +46,24 @@ class StorageService:
         # the stream directly so a video is never materialised in application RAM.
         await asyncio.to_thread(_copy_to_path, file.file, path)
         return f"/uploads/{name}"
+
+    def signed_url(self, url: str) -> str:
+        """Create a short-lived GET URL for an S3 object.
+
+        Local development assets keep their normal URL because Starlette's
+        static file server has no equivalent presigning mechanism.
+        """
+        if not self.settings.s3_bucket or not url:
+            return url
+        key = url.split(f"{self.settings.s3_bucket}.s3.", 1)[-1].split("/", 1)[-1]
+        base = self.settings.s3_public_base_url.rstrip("/")
+        if base and url.startswith(base + "/"):
+            key = url.removeprefix(base + "/")
+        try:
+            import boto3
+            return boto3.client("s3", region_name=self.settings.aws_region).generate_presigned_url(
+                "get_object", Params={"Bucket": self.settings.s3_bucket, "Key": key},
+                ExpiresIn=int(timedelta(minutes=self.settings.signed_url_minutes).total_seconds()),
+            )
+        except ImportError as exc:
+            raise RuntimeError("boto3 is required when S3_BUCKET is configured") from exc

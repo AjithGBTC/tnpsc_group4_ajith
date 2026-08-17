@@ -20,6 +20,7 @@ class VideoIn(LocalizedTitleIn):
     video_url: str; thumbnail_url: str | None = None; duration: int | None = Field(None, ge=0); notes_url: str | None = None
 class PdfIn(BaseModel):
     chapter_id: uuid.UUID; title: str; description: str | None = None; file_url: str
+    offline_allowed: bool = False; is_priority: bool = False
 class TestIn(BaseModel):
     chapter_id: uuid.UUID | None = None; title: str
     type: str = Field(pattern="^(subjectWise|pyq|fullTest)$")

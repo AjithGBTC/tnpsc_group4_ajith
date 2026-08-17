@@ -9,6 +9,9 @@ from app.models.course import (Chapter, CourseAnswer, CourseAttempt, CoursePdf, 
 from app.models.entities import User
 from app.schemas.course import AnswerIn, ChapterIn, PdfIn, QuestionIn, SubmitIn, SubjectIn, TestIn, UnitIn, VideoIn
 from app.services.storage import StorageService
+from app.services.cache import CacheService
+from app.services.notifications import send_topic_notification
+from app.tasks.celery_app import transcode_video_to_hls
 
 router = APIRouter(tags=["TNPSC Course"])
 ADMIN_MODELS = {"subjects": (Subject, SubjectIn), "units": (Unit, UnitIn), "chapters": (Chapter, ChapterIn), "videos": (CourseVideo, VideoIn), "pdfs": (CoursePdf, PdfIn), "tests": (CourseTest, TestIn)}
@@ -32,16 +35,24 @@ async def active_chapter_or_422(chapter_id: uuid.UUID, db: AsyncSession) -> Chap
 
 @router.get("/mobile/syllabus")
 async def syllabus(db: AsyncSession = Depends(get_db)):
+    cache = CacheService()
+    if cached := await cache.get("course:syllabus:v1"):
+        return cached
     subjects = (await db.scalars(select(Subject).where(Subject.deleted_at.is_(None), Subject.status == "active").order_by(Subject.category, Subject.title_english))).all()
     units = (await db.scalars(select(Unit).where(Unit.deleted_at.is_(None), Unit.status == "active").order_by(Unit.unit_number))).all()
     chapters = (await db.scalars(select(Chapter).where(Chapter.deleted_at.is_(None), Chapter.status == "active").order_by(Chapter.chapter_number))).all()
-    return {"data": [{**out(s), "units": [{**out(u), "chapters": [out(c) for c in chapters if c.unit_id == u.id]} for u in units if u.subject_id == s.id]} for s in subjects]}
+    response = {"data": [{**out(s), "units": [{**out(u), "chapters": [out(c) for c in chapters if c.unit_id == u.id]} for u in units if u.subject_id == s.id]} for s in subjects]}
+    await cache.set("course:syllabus:v1", response, seconds=600)
+    return response
 
 @router.get("/mobile/chapters/{chapter_id}/content")
 async def chapter_content(chapter_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if not await db.get(Chapter, chapter_id): raise HTTPException(404, "Chapter not found")
     async def rows(model): return (await db.scalars(select(model).where(model.chapter_id == chapter_id, model.deleted_at.is_(None), model.status == "active"))).all()
-    return {"data": {"videos": [out(x) for x in await rows(CourseVideo)], "pdfs": [out(x) for x in await rows(CoursePdf)], "tests": [out(x) for x in await rows(CourseTest)]}}
+    storage = StorageService()
+    videos = [{**out(x), "video_url": storage.signed_url(x.hls_url or x.video_url)} for x in await rows(CourseVideo)]
+    pdfs = [{**out(x), "file_url": storage.signed_url(x.file_url)} for x in await rows(CoursePdf)]
+    return {"data": {"videos": videos, "pdfs": pdfs, "tests": [out(x) for x in await rows(CourseTest)]}}
 
 @router.get("/mobile/course/tests")
 async def tests(chapter_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)):
@@ -90,7 +101,7 @@ async def admin_create(resource: str, payload: dict, user: User = Depends(curren
     pair = ADMIN_MODELS.get(resource)
     if not pair: raise HTTPException(404, "Unknown resource")
     values = pair[1].model_validate(payload).model_dump(); item = pair[0](**values, created_by=user.id, updated_by=user.id)
-    db.add(item); await db.commit(); await db.refresh(item); return {"data": out(item)}
+    db.add(item); await db.commit(); await CacheService().delete("course:syllabus:v1"); await db.refresh(item); return {"data": out(item)}
 
 @router.patch("/admin/course/{resource}/{item_id}", dependencies=[Depends(require_permissions("content:write"))])
 async def admin_update(resource: str, item_id: uuid.UUID, payload: dict, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
@@ -98,14 +109,14 @@ async def admin_update(resource: str, item_id: uuid.UUID, payload: dict, user: U
     if not item or item.deleted_at: raise HTTPException(404, "Resource not found")
     values = pair[1].model_validate({**out(item), **payload}).model_dump()
     for key, value in values.items(): setattr(item, key, value)
-    item.updated_by = user.id; await db.commit(); return {"data": out(item)}
+    item.updated_by = user.id; await db.commit(); await CacheService().delete("course:syllabus:v1"); return {"data": out(item)}
 
 @router.delete("/admin/course/{resource}/{item_id}", status_code=204, dependencies=[Depends(require_permissions("content:write"))])
 async def admin_delete(resource: str, item_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     from datetime import UTC, datetime
     pair = ADMIN_MODELS.get(resource); item = await db.get(pair[0], item_id) if pair else None
     if not item or item.deleted_at: raise HTTPException(404, "Resource not found")
-    item.deleted_at = datetime.now(UTC); item.updated_by = user.id; await db.commit()
+    item.deleted_at = datetime.now(UTC); item.updated_by = user.id; await db.commit(); await CacheService().delete("course:syllabus:v1")
 
 @router.post("/admin/course/questions", status_code=201, dependencies=[Depends(require_permissions("questions:write"))])
 async def create_question(payload: QuestionIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
@@ -140,6 +151,15 @@ async def upload_course_video(
     url = await StorageService().upload(file, prefix="course/videos")
     item = CourseVideo(chapter_id=chapter_id, title_tamil=title_ta, title_english=title_en, faculty_name=faculty_name, duration=duration, thumbnail_url=thumbnail_url, notes_url=notes_url, video_url=url, created_by=user.id, updated_by=user.id)
     db.add(item); await db.commit(); await db.refresh(item)
+    # The worker owns FFmpeg. Local storage can be transcoded immediately by
+    # path; cloud storage requires a worker staging adapter before dispatch.
+    if url.startswith("/uploads/"):
+        source = str(__import__("pathlib").Path(url.removeprefix("/")).resolve())
+        output = str(__import__("pathlib").Path("uploads/hls") / str(item.id))
+        item.hls_url = f"/uploads/hls/{item.id}/index.m3u8"
+        item.transcoding_status = "processing"
+        await db.commit()
+        transcode_video_to_hls.delay(source, output)
     return {"data": out(item)}
 
 
@@ -149,6 +169,8 @@ async def upload_course_pdf(
     title: str = Form(...),
     file: UploadFile = File(...),
     description: str | None = Form(None),
+    offline_allowed: bool = Form(False),
+    is_priority: bool = Form(False),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -156,7 +178,7 @@ async def upload_course_pdf(
     if file.content_type != "application/pdf":
         raise HTTPException(400, "Only PDF uploads are allowed")
     url = await StorageService().upload(file, prefix="course/pdfs")
-    item = CoursePdf(chapter_id=chapter_id, title=title, description=description, file_url=url, created_by=user.id, updated_by=user.id)
+    item = CoursePdf(chapter_id=chapter_id, title=title, description=description, file_url=url, offline_allowed=offline_allowed, is_priority=is_priority, created_by=user.id, updated_by=user.id)
     db.add(item); await db.commit(); await db.refresh(item)
     return {"data": out(item)}
 
