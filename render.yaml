@@ -30,6 +30,11 @@ services:
         value: "30"
       - key: CORS_ORIGINS
         sync: false
+      # Optional: an anchored regular expression for approved browser origins.
+      # For example: ^https://your-admin-app\.onrender\.com$
+      # Do not use `.*` in production.
+      - key: CORS_ORIGIN_REGEX
+        sync: false
       - key: S3_BUCKET
         sync: false
       - key: S3_PUBLIC_BASE_URL

@@ -54,11 +54,11 @@ The backend sends FCM topic notifications to `tnpsc_all` when an admin uploads a
 
 The repository root contains `render.yaml`. In Render, select **New > Blueprint**, connect this repository, and select the blueprint. Render creates the `exam-platform-api` Docker web service and managed PostgreSQL database, passing the database's private connection string to `DATABASE_URL`.
 
-During Blueprint creation, provide `REDIS_URL` (a TLS Redis URL from Render Key Value or another provider) and `CORS_ORIGINS` (the exact frontend origin, for example `https://your-admin.onrender.com`). Keep the generated `JWT_SECRET_KEY` private. The Blueprint runs `alembic upgrade head` as its pre-deploy command.
+During Blueprint creation, provide `REDIS_URL` (a TLS Redis URL from Render Key Value or another provider) and `CORS_ORIGINS` (the exact frontend origin, for example `https://your-admin.onrender.com`). If the frontend uses a variable trusted hostname, set the optional anchored `CORS_ORIGIN_REGEX` instead (for example `^https://your-admin-app\\.onrender\\.com$`). Keep the generated `JWT_SECRET_KEY` private. The Blueprint runs `alembic upgrade head` as its pre-deploy command.
 
 ## Commerce and content operations
 
 - `/api/v1/plans` and `/api/v1/payments/*` provide plan discovery, Razorpay orders, signature verification, webhook verification, invoices, and subscriptions. Values are integer paise.
 - `/api/v1/questions/import` and `/api/v1/questions/export` provide the Excel bulk-content workflow; export produces the import template.
 - Device registration, broadcast notifications, protected video publishing, user analytics, and dashboard totals are available under `/api/v1/devices`, `/api/v1/admin/*`, and `/api/v1/users/*`.
-- Production must set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, and `CORS_ORIGINS`, then run `alembic upgrade head`.
+- Production must set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, and `CORS_ORIGINS` (and, if needed, `CORS_ORIGIN_REGEX`), then run `alembic upgrade head`.
