@@ -29,7 +29,9 @@ app.add_middleware(
     allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Accept", "Authorization", "Content-Type"],
+    # Dio's Flutter web adapter sends this header, which makes the browser
+    # issue a CORS preflight request before the login request.
+    allow_headers=["Accept", "Authorization", "Content-Type", "X-Requested-With"],
     max_age=600,
 )
 app.add_middleware(AuditRequestMiddleware)
