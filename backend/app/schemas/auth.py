@@ -1,7 +1,10 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
+    """The JSON object accepted by POST /api/v1/auth/login."""
+
+    model_config = ConfigDict(extra="forbid")
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     device_name: str | None = Field(default=None, max_length=160)

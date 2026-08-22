@@ -50,6 +50,26 @@ Subjects, units, and chapters accept and return Flutter's `title_ta` and
 
 The backend sends FCM topic notifications to `tnpsc_all` when an admin uploads a PDF, creates a standard/smart test, or announces a live test. Set `FIREBASE_CREDENTIALS_PATH` to the **absolute server-only path** of the Firebase Admin service-account JSON. Do not place that file in the repository or Flutter project. Flutter clients subscribe to `tnpsc_all` after notification permission is granted.
 
+## Flutter Web login
+
+`POST /api/v1/auth/login` accepts a JSON **object**, not form data or a JSON-encoded string. Send `Content-Type: application/json` and pass a map directly to Dio:
+
+```dart
+final response = await dio.post(
+  '$apiBaseUrl/api/v1/auth/login',
+  data: {
+    'email': email,
+    'password': password,
+    'device_name': 'flutter-web',
+  },
+  options: Options(contentType: Headers.jsonContentType),
+);
+```
+
+Do not call `jsonEncode` on the map when using Dio; double-encoding produces a JSON string and FastAPI responds with `422 Input should be a valid dictionary or object`.
+
+For local Flutter Web, the default CORS policy permits `localhost` and `127.0.0.1` on any port. For production, set `CORS_ORIGINS` to a comma-separated list of exact frontend origins, such as `https://app.example.com`; do not use `*` when credentials are enabled.
+
 ## Deploy to Render
 
 The repository root contains `render.yaml`. In Render, select **New > Blueprint**, connect this repository, and select the blueprint. Render creates the `exam-platform-api` Docker web service and managed PostgreSQL database, passing the database's private connection string to `DATABASE_URL`.

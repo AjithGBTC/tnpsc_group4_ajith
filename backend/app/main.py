@@ -21,8 +21,11 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 app = FastAPI(title="TNPSC Group 4 Learning API", version="1.0.0", openapi_url="/api/v1/openapi.json", docs_url="/docs", redoc_url="/redoc", lifespan=lifespan)
-# CORSMiddleware answers browser preflight OPTIONS requests before route
-# dependencies run, so the Authorization token is never needed for preflight.
+app.add_middleware(AuditRequestMiddleware)
+app.add_middleware(RateLimitMiddleware)
+# Add CORS last: Starlette wraps middleware in reverse registration order, so
+# this makes it the outermost layer.  Browser OPTIONS preflights and errors
+# returned by the audit/rate-limit layers then always include CORS headers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -34,8 +37,6 @@ app.add_middleware(
     allow_headers=["Accept", "Authorization", "Content-Type", "X-Requested-With"],
     max_age=600,
 )
-app.add_middleware(AuditRequestMiddleware)
-app.add_middleware(RateLimitMiddleware)
 app.include_router(api_router, prefix="/api/v1")
 Path("uploads").mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
