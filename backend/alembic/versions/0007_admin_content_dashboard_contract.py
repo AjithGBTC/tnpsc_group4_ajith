@@ -1,6 +1,6 @@
 """Persist the Flutter admin course video/PDF contract.
 
-Revision ID: 0007_admin_content_dashboard_contract
+Revision ID: 0007_admin_content_contract
 Revises: 0006_private_course_assets
 """
 from alembic import op
@@ -8,7 +8,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "0007_admin_content_dashboard_contract"
+# Keep this at or below 32 characters: existing Render databases created by
+# Alembic use VARCHAR(32) for alembic_version.version_num.
+revision = "0007_admin_content_contract"
 down_revision = "0006_private_course_assets"
 branch_labels = None
 depends_on = None
