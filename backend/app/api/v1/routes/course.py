@@ -24,6 +24,13 @@ def out(item):
         values["title_ta"] = values.pop("title_tamil")
     if "title_english" in values:
         values["title_en"] = values.pop("title_english")
+    if isinstance(item, CourseVideo):
+        values["faculty"] = values.pop("faculty_name", None)
+        values["is_published"] = item.status == "active"
+    if isinstance(item, CoursePdf):
+        values["pdf_url"] = values.pop("file_url")
+        values["is_downloadable"] = values.pop("offline_allowed")
+        values["is_published"] = item.status == "active"
     return values
 
 
@@ -32,6 +39,58 @@ async def active_chapter_or_422(chapter_id: uuid.UUID, db: AsyncSession) -> Chap
     if not chapter or chapter.deleted_at or chapter.status != "active":
         raise HTTPException(422, "chapter_id must reference an active chapter")
     return chapter
+
+
+async def validate_content_hierarchy(values: dict, db: AsyncSession) -> None:
+    """Ensure dashboard-provided hierarchy IDs describe the selected chapter."""
+    if not {"chapter_id", "subject_id", "unit_id"}.issubset(values):
+        return
+    chapter = await active_chapter_or_422(values["chapter_id"], db)
+    unit = await db.get(Unit, values["unit_id"])
+    if not unit or unit.deleted_at or unit.status != "active" or chapter.unit_id != unit.id:
+        raise HTTPException(422, "unit_id must reference the chapter's active unit")
+    subject = await db.get(Subject, values["subject_id"])
+    if not subject or subject.deleted_at or subject.status != "active" or unit.subject_id != subject.id:
+        raise HTTPException(422, "subject_id must reference the unit's active subject")
+
+
+async def content_values(schema, payload: dict, db: AsyncSession) -> dict:
+    values = schema.model_validate(payload).model_dump()
+    is_published = values.pop("is_published", None)
+    if is_published is not None:
+        values["status"] = "active" if is_published else "draft"
+    await validate_content_hierarchy(values, db)
+    return values
+
+
+# Explicit routes expose the exact dashboard schemas in OpenAPI.  The generic
+# admin routes below remain for the other course resources and legacy clients.
+@router.get("/admin/course/videos", dependencies=[Depends(require_permissions("content:write"))])
+async def admin_list_videos(db: AsyncSession = Depends(get_db)):
+    rows = await db.scalars(select(CourseVideo).where(CourseVideo.deleted_at.is_(None)))
+    return {"data": [out(item) for item in rows.all()]}
+
+
+@router.post("/admin/course/videos", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("content:write"))])
+async def admin_create_video(payload: VideoIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    values = await content_values(VideoIn, payload.model_dump(), db)
+    item = CourseVideo(**values, created_by=user.id, updated_by=user.id)
+    db.add(item); await db.commit(); await CacheService().delete("course:syllabus:v1"); await db.refresh(item)
+    return {"data": out(item)}
+
+
+@router.get("/admin/course/pdfs", dependencies=[Depends(require_permissions("content:write"))])
+async def admin_list_pdfs(db: AsyncSession = Depends(get_db)):
+    rows = await db.scalars(select(CoursePdf).where(CoursePdf.deleted_at.is_(None)))
+    return {"data": [out(item) for item in rows.all()]}
+
+
+@router.post("/admin/course/pdfs", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("content:write"))])
+async def admin_create_pdf(payload: PdfIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    values = await content_values(PdfIn, payload.model_dump(), db)
+    item = CoursePdf(**values, created_by=user.id, updated_by=user.id)
+    db.add(item); await db.commit(); await CacheService().delete("course:syllabus:v1"); await db.refresh(item)
+    return {"data": out(item)}
 
 @router.get("/mobile/syllabus")
 async def syllabus(db: AsyncSession = Depends(get_db)):
@@ -100,14 +159,15 @@ async def admin_list(resource: str, db: AsyncSession = Depends(get_db)):
 async def admin_create(resource: str, payload: dict, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     pair = ADMIN_MODELS.get(resource)
     if not pair: raise HTTPException(404, "Unknown resource")
-    values = pair[1].model_validate(payload).model_dump(); item = pair[0](**values, created_by=user.id, updated_by=user.id)
+    values = await content_values(pair[1], payload, db) if resource in {"videos", "pdfs"} else pair[1].model_validate(payload).model_dump()
+    item = pair[0](**values, created_by=user.id, updated_by=user.id)
     db.add(item); await db.commit(); await CacheService().delete("course:syllabus:v1"); await db.refresh(item); return {"data": out(item)}
 
 @router.patch("/admin/course/{resource}/{item_id}", dependencies=[Depends(require_permissions("content:write"))])
 async def admin_update(resource: str, item_id: uuid.UUID, payload: dict, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     pair = ADMIN_MODELS.get(resource); item = await db.get(pair[0], item_id) if pair else None
     if not item or item.deleted_at: raise HTTPException(404, "Resource not found")
-    values = pair[1].model_validate({**out(item), **payload}).model_dump()
+    values = await content_values(pair[1], {**out(item), **payload}, db) if resource in {"videos", "pdfs"} else pair[1].model_validate({**out(item), **payload}).model_dump()
     for key, value in values.items(): setattr(item, key, value)
     item.updated_by = user.id; await db.commit(); await CacheService().delete("course:syllabus:v1"); return {"data": out(item)}
 

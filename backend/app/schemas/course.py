@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class LocalizedTitleIn(BaseModel):
@@ -16,11 +16,26 @@ class ChapterIn(LocalizedTitleIn):
     unit_id: uuid.UUID; chapter_number: int = Field(ge=1)
     standard: int = Field(ge=6, le=12)
 class VideoIn(LocalizedTitleIn):
-    chapter_id: uuid.UUID; faculty_name: str | None = None
-    video_url: str; thumbnail_url: str | None = None; duration: int | None = Field(None, ge=0); notes_url: str | None = None
+    chapter_id: uuid.UUID; subject_id: uuid.UUID; unit_id: uuid.UUID
+    faculty_name: str | None = Field(default=None, validation_alias=AliasChoices("faculty", "faculty_name"))
+    description: str | None = None
+    duration: str | None = Field(default=None, max_length=80)
+    video_url: str; thumbnail_url: str | None = None; notes_url: str | None = None
+    is_published: bool = True
+    quiz_questions: list = Field(default_factory=list)
 class PdfIn(BaseModel):
-    chapter_id: uuid.UUID; title: str; description: str | None = None; file_url: str
-    offline_allowed: bool = False; is_priority: bool = False
+    model_config = ConfigDict(populate_by_name=True)
+    chapter_id: uuid.UUID; subject_id: uuid.UUID; unit_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=240, validation_alias=AliasChoices("title_en", "title"))
+    title_tamil: str | None = Field(default=None, max_length=240, validation_alias="title_ta")
+    title_english: str | None = Field(default=None, max_length=240, validation_alias="title_en")
+    category: str | None = Field(default=None, max_length=120)
+    description: str | None = None; author: str | None = Field(default=None, max_length=160)
+    file_url: str = Field(validation_alias=AliasChoices("pdf_url", "file_url"))
+    file_size: int | None = Field(default=None, ge=0)
+    offline_allowed: bool = Field(default=False, validation_alias=AliasChoices("is_downloadable", "offline_allowed"))
+    is_priority: bool = False
+    is_published: bool = True
 class TestIn(BaseModel):
     chapter_id: uuid.UUID | None = None; title: str
     type: str = Field(pattern="^(subjectWise|pyq|fullTest)$")

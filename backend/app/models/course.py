@@ -39,23 +39,34 @@ class Chapter(AuditModel):
 class CourseVideo(AuditModel):
     __tablename__ = "course_videos"
     chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subjects.id", ondelete="SET NULL"), index=True)
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("units.id", ondelete="SET NULL"), index=True)
     title_tamil: Mapped[str] = mapped_column(String(240), nullable=False)
     title_english: Mapped[str] = mapped_column(String(240), nullable=False)
     faculty_name: Mapped[str | None] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(Text)
     video_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     thumbnail_url: Mapped[str | None] = mapped_column(String(1000))
-    duration: Mapped[int | None] = mapped_column(Integer)
+    duration: Mapped[str | None] = mapped_column(String(80))
     notes_url: Mapped[str | None] = mapped_column(String(1000))
     hls_url: Mapped[str | None] = mapped_column(String(1000))
     transcoding_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    quiz_questions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
 
 
 class CoursePdf(AuditModel):
     __tablename__ = "course_pdfs"
     chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subjects.id", ondelete="SET NULL"), index=True)
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("units.id", ondelete="SET NULL"), index=True)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
+    title_tamil: Mapped[str | None] = mapped_column(String(240))
+    title_english: Mapped[str | None] = mapped_column(String(240))
+    category: Mapped[str | None] = mapped_column(String(120))
+    author: Mapped[str | None] = mapped_column(String(160))
     description: Mapped[str | None] = mapped_column(Text)
     file_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_size: Mapped[int | None] = mapped_column(Integer)
     offline_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
